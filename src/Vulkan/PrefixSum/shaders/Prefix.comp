@@ -1,0 +1,77 @@
+#version 450
+
+layout(local_size_x_id = 100) in;
+
+layout(set = 0, binding = 0) readonly buffer BufferA {
+    float data[];
+} buffer_in;
+
+layout(set = 0, binding = 1) writeonly buffer BufferB {
+    float data[];
+} buffer_out;
+
+layout(set = 0, binding = 2) writeonly buffer BufferC{
+    float data[];
+} part_Sum;
+
+layout(set = 0, binding = 3) buffer BufferTemp{
+    float data[];
+} temp;
+
+layout (constant_id = 2) const uint sumSubGroupSize = 16;
+
+layout(push_constant) uniform PushConstants {
+    uint n; // matrix_c's number of columns
+};
+
+void main() {
+
+    uint x = gl_GlobalInvocationID.x;
+    uint xi = gl_LocalInvocationID.x;
+    int offset = 1;
+    if (2*x >= n){
+        temp.data[2*x] = 0.0f;
+        temp.data[2*x+1] = 0.0f;
+    }else{
+        temp.data[2*x] = buffer_in.data[2*x];
+        temp.data[2*x+1] = buffer_in.data[2*x+1];
+    }
+
+    for(uint d = sumSubGroupSize>>1; d > 0; d >>= 1) // build sum in place up the tree
+    {
+        groupMemoryBarrier();
+        barrier();
+        if(xi < d){
+            uint ai = offset*(2*xi+1)-1 + (gl_WorkGroupID.x * sumSubGroupSize);
+            uint bi = offset*(2*xi+2)-1 + (gl_WorkGroupID.x * sumSubGroupSize);
+            temp.data[bi] += temp.data[ai];
+        }
+        offset *= 2;
+    }
+
+    if(xi == 0){
+        part_Sum.data[gl_WorkGroupID.x] = temp.data[(gl_WorkGroupID.x + 1) * sumSubGroupSize - 1];
+        temp.data[(gl_WorkGroupID.x + 1) * sumSubGroupSize - 1] = 0.0f; // clear the last element
+    }
+
+    for(uint d = 1; d < sumSubGroupSize; d *= 2) // traverse down tree & build scan
+    {
+        offset >>= 1;
+        groupMemoryBarrier();
+        barrier();
+        if(xi < d){
+            uint ai = offset*(2*xi+1)-1 + (gl_WorkGroupID.x * sumSubGroupSize);
+            uint bi = offset*(2*xi+2)-1 + (gl_WorkGroupID.x * sumSubGroupSize);
+            float t = temp.data[ai];
+            temp.data[ai] = temp.data[bi];
+            temp.data[bi] += t;
+        }
+    }
+
+    groupMemoryBarrier();
+    barrier();
+    if (2*x < n){
+        buffer_out.data[2*x] = temp.data[2*x];
+        buffer_out.data[2*x+1] = temp.data[2*x+1];
+    }
+}

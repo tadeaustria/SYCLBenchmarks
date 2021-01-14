@@ -1,0 +1,74 @@
+#version 450
+
+layout(local_size_x_id = 100) in;
+
+layout(set = 0, binding = 0) readonly buffer BufferA {
+    float data[];
+} buffer_in;
+
+layout(set = 0, binding = 1) writeonly buffer BufferB {
+    float data[];
+} buffer_out;
+
+layout(set = 0, binding = 2) writeonly buffer BufferC{
+    float data[];
+} part_Sum;
+
+layout (constant_id = 2) const uint sumSubGroupSize = 16;
+
+layout(push_constant) uniform PushConstants {
+    uint n; // matrix_c's number of columns
+};
+
+shared float localBuf[sumSubGroupSize];
+
+void main() {
+
+    uint x = gl_LocalInvocationID.x;
+    int offset = 1;
+    if (2*gl_GlobalInvocationID.x >= n){
+        localBuf[2*x] = 0.0f;
+        localBuf[2*x+1] = 0.0f;
+    }else{
+        localBuf[2*x] = buffer_in.data[2*gl_GlobalInvocationID.x];
+        localBuf[2*x+1] = buffer_in.data[2*gl_GlobalInvocationID.x+1];
+    }
+
+    for(uint d = sumSubGroupSize>>1; d > 0; d >>= 1) // build sum in place up the tree
+    {
+        memoryBarrierShared();
+        barrier();
+        if(x < d){
+            uint ai = offset*(2*x+1)-1;
+            uint bi = offset*(2*x+2)-1;
+            localBuf[bi] += localBuf[ai];
+        }
+        offset *= 2;
+    }
+
+    if(x == 0){
+        part_Sum.data[gl_WorkGroupID.x] = localBuf[sumSubGroupSize - 1];
+        localBuf[sumSubGroupSize - 1] = 0.0f; // clear the last element
+    }
+
+    for(uint d = 1; d < sumSubGroupSize; d *= 2) // traverse down tree & build scan
+    {
+        offset >>= 1;
+        memoryBarrierShared();
+        barrier();
+        if(x < d){
+            uint ai = offset*(2*x+1)-1;
+            uint bi = offset*(2*x+2)-1;
+            float t = localBuf[ai];
+            localBuf[ai] = localBuf[bi];
+            localBuf[bi] += t;
+        }
+    }
+
+    memoryBarrierShared();
+    barrier();
+    if (2*gl_GlobalInvocationID.x < n){
+        buffer_out.data[2*gl_GlobalInvocationID.x] = localBuf[2*x];
+        buffer_out.data[2*gl_GlobalInvocationID.x+1] = localBuf[2*x+1];
+    }
+}

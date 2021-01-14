@@ -1,0 +1,26 @@
+#version 450
+
+layout(local_size_x_id = 100) in;
+
+layout(set = 0, binding = 0) buffer BufferA {
+    float data[];
+} buffer_inout;
+
+layout(set = 0, binding = 1) readonly buffer BufferC{
+    float data[];
+} part_Sum;
+
+layout(push_constant) uniform PushConstants {
+    uint n; // matrix_c's number of columns
+};
+
+// shared float localBuf[sumSubGroupSize];
+
+void main() {
+
+    if (2*gl_GlobalInvocationID.x < n){
+        buffer_inout.data[2*gl_GlobalInvocationID.x] += part_Sum.data[gl_WorkGroupID.x];
+        buffer_inout.data[2*gl_GlobalInvocationID.x+1] += part_Sum.data[gl_WorkGroupID.x];
+    }
+    
+}

@@ -1,0 +1,34 @@
+#version 450
+
+layout(local_size_x_id = 100, local_size_y_id = 101, local_size_z_id = 102) in;
+
+layout(set = 0, binding = 0) readonly buffer mat_a {
+    float data[];
+} source;
+
+layout(set = 0, binding = 1) writeonly buffer mat_b {
+    float data[];
+} target;
+
+layout(push_constant) uniform PushConstants {
+    uint k; // source's number of columns
+    uint m; // source's number of rows
+    uint i; // heatsource x value
+    uint j; // heatsource y value
+};
+
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    uint y = gl_GlobalInvocationID.y;
+    uint id = y * k + x;
+    float temp = 4.0f * source.data[id];
+    temp += (x == 0) ? source.data[id] : source.data[id - 1];
+    temp += (x == k - 1) ? source.data[id] : source.data[id + 1];
+    temp += (y == 0) ? source.data[id] : source.data[id - k];
+    temp += (y == m - 1) ? source.data[id] : source.data[id + k];
+    if (x == i && y == j){
+        target.data[id] = source.data[id];
+    }else{
+        target.data[id] = temp / 8.0f;
+    }
+}
